@@ -1,0 +1,28 @@
+# Shared by every run in the vocabulary sweep. Only the tokenizer changes
+# between runs, so differences in results are caused by tokenization.
+#
+# The non-embedding part of the model (5 blocks) is identical for every
+# vocabulary: 5 * (4*64^2 + 3*64*256) = 327,680 parameters. The embedding adds
+# vocab_size * 64, so the largest run (vocab 2048) totals 458,752 -- still
+# under the 500K budget from the original assignment.
+
+d_model: 64
+n_layers: 5
+n_heads: 4
+d_ff: 256
+dropout: 0.0
+context_length: 256   # tokens; how many *moves* fit depends on the vocabulary
+
+max_steps: 5000
+batch_size: 32
+learning_rate: 0.001
+min_lr: 0.00001
+warmup_steps: 200
+weight_decay: 0.1
+gradient_clip_norm: 1.0
+beta1: 0.9
+beta2: 0.95
+
+eval_interval: 250
+eval_iters: 50
+seed: 42

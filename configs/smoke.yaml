@@ -1,0 +1,12 @@
+# Tiny run for CI and quick checks. Not used for any reported result.
+d_model: 32
+n_layers: 2
+n_heads: 2
+d_ff: 64
+context_length: 64
+max_steps: 20
+batch_size: 8
+warmup_steps: 5
+eval_interval: 10
+eval_iters: 2
+seed: 42
