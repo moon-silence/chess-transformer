@@ -2,6 +2,8 @@
 
     python scripts/run_sweep.py                      # full sweep (Colab GPU)
     python scripts/run_sweep.py --vocab-sizes 257 512 --max_steps 500
+
+Vocabularies with a finished runs/v{V}/train_summary.json are not retrained (use --retrain).
 """
 
 from __future__ import annotations
@@ -23,12 +25,19 @@ def main() -> None:
     ap.add_argument("--results", default="results/sweep.json")
     ap.add_argument("--max_steps", type=int, default=None)
     ap.add_argument("--n-positions", type=int, default=500)
+    ap.add_argument("--retrain", action="store_true",
+                    help="train again even if runs/v{V}/train_summary.json exists")
     args = ap.parse_args()
 
     cfg = TrainConfig.from_yaml(args.config, max_steps=args.max_steps)
     rows = []
     for v in args.vocab_sizes:
-        s = train(cfg, f"{args.data_dir}/v{v}", f"{args.runs_dir}/v{v}")
+        done = Path(args.runs_dir) / f"v{v}" / "train_summary.json"
+        if done.exists() and not args.retrain:  # resume after a Colab disconnect
+            print(f"[vocab {v}] already trained, reusing {done}")
+            s = json.loads(done.read_text())
+        else:
+            s = train(cfg, f"{args.data_dir}/v{v}", f"{args.runs_dir}/v{v}")
         e = evaluate(v, args.data_dir, args.runs_dir, n_positions=args.n_positions)
         rows.append({**{k: s[k] for k in s if k != "history"}, "history": s["history"],
                      "legal_rate": e["teacher_forced"]["legal_rate"],
