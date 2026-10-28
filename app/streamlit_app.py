@@ -18,11 +18,15 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
+import altair as alt  # noqa: E402
 import chess  # noqa: E402
 import chess.svg  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 import torch  # noqa: E402
 
+from chesslm.attention import attention_maps, move_attention  # noqa: E402
 from chesslm.legality import Sampler, is_legal, prefix_text  # noqa: E402
 from chesslm.pgn import canonical_movetext, raw_san_tokens  # noqa: E402
 from chesslm.probes import LinearProbe, extract_features, square_classes  # noqa: E402
@@ -161,8 +165,8 @@ def model_move(sans: list[str], board: chess.Board, tries: int = 5):
     return board.san(random.choice(list(board.legal_moves))), "fallback", attempts
 
 
-tab_play, tab_watch, tab_probe, tab_tok, tab_results = st.tabs(
-    ["Play it", "Watch it play", "Inside the model", "Tokenizer", "Results"]
+tab_play, tab_watch, tab_probe, tab_att, tab_tok, tab_results = st.tabs(
+    ["Play it", "Watch it play", "Inside the model", "Attention", "Tokenizer", "Results"]
 )
 
 # --------------------------------------------------------------------------
@@ -334,6 +338,107 @@ with tab_probe:
                 "Squares correct",
                 f"{acc:.0%}",
                 help=f"occupied squares: {(pred[occ] == truth[occ]).mean():.0%}",
+            )
+
+# --------------------------------------------------------------------------
+# attention
+# --------------------------------------------------------------------------
+with tab_att:
+    st.markdown(
+        "Each layer has several **attention heads**. When the model reads a move, every head "
+        "decides which earlier moves to look back at. Arrows on the board point from the squares "
+        "of the moves it looks at most to the move being read."
+    )
+    games = test_openings()
+    if not games:
+        st.info("No games available.")
+    else:
+        c1, c2, c3 = st.columns(3)
+        gi = c1.number_input("Test game #", 0, len(games) - 1, 0, key="att_game")
+        layer_i = c2.selectbox("Layer", list(range(len(model.blocks))))
+        n_heads = model.blocks[0].attn.n_heads
+        head_opt = ["average of heads"] + [f"head {h}" for h in range(n_heads)]
+        head_sel = c3.selectbox("Head", head_opt)
+        sans_all = games[gi]["sans"]
+        # keep the game inside the context window
+        ids_all = tok.encode(canonical_movetext(sans_all, "").rstrip())
+        n_fit = len(sans_all)
+        while len(ids_all) > model.context_length and n_fit > 2:
+            n_fit = int(n_fit * 0.9)
+            ids_all = tok.encode(canonical_movetext(sans_all[:n_fit], "").rstrip())
+        sans_a = sans_all[:n_fit]
+        q = st.slider("Move being read (ply)", 2, len(sans_a), min(20, len(sans_a))) - 1
+        att = attention_maps(model, torch.tensor([ids_all]))
+        ma = move_attention(att, tok, ids_all, sans_a)  # (L, H, n, n)
+        A = (
+            ma[layer_i].mean(0)
+            if head_sel.startswith("average")
+            else ma[layer_i, int(head_sel[5:])]
+        )
+        row = A[q, : q + 1]
+
+        board = chess.Board()
+        moves = []
+        for s_ in sans_a[: q + 1]:
+            m_ = board.parse_san(s_)
+            moves.append(m_)
+            board.push(m_)
+        top = [int(k) for k in np.argsort(row[:q])[::-1][:4] if row[k] > 0.02]
+        arrows = [
+            chess.svg.Arrow(
+                moves[k].to_square,
+                moves[q].to_square,
+                color=f"#0f766e{int(55 + 200 * row[k] / max(row[:q].max(), 1e-6)):02x}",
+            )
+            for k in top
+            if moves[k].to_square != moves[q].to_square
+        ]
+
+        def label(k):
+            return f"{k // 2 + 1}{'.' if k % 2 == 0 else '...'}{sans_a[k]}"
+
+        cb, ch = st.columns([1, 1.2])
+        with cb:
+            show_svg(chess.svg.board(board, size=400, lastmove=moves[q], arrows=arrows))
+
+            st.markdown(f"Reading **{label(q)}**. It looks most at:")
+            for k in top:
+                st.markdown(f"- {label(k)} · {row[k]:.0%}")
+            st.caption(f"Itself: {row[q]:.0%}")
+        with ch:
+            lo = max(0, q - 23)
+            sub = A[lo : q + 1, lo : q + 1]
+            names = [label(k) for k in range(lo, q + 1)]
+            df = pd.DataFrame(
+                [
+                    (names[i], names[j], float(sub[i, j]))
+                    for i in range(len(names))
+                    for j in range(i + 1)
+                ],
+                columns=["reading", "looks at", "weight"],
+            )
+            chart = (
+                alt.Chart(df)
+                .mark_rect()
+                .encode(
+                    x=alt.X("looks at:N", sort=names, title="earlier move"),
+                    y=alt.Y("reading:N", sort=names, title="move being read"),
+                    color=alt.Color(
+                        "weight:Q",
+                        scale=alt.Scale(scheme="tealblues"),
+                        legend=alt.Legend(format=".0%"),
+                    ),
+                    tooltip=["reading", "looks at", alt.Tooltip("weight:Q", format=".1%")],
+                )
+                .properties(height=430, title=f"Layer {layer_i}, {head_sel} (last 24 moves)")
+            )
+            st.altair_chart(chart, use_container_width=True)
+        prev_same = [k for k in range(q) if moves[k].to_square == moves[q].from_square]
+        if prev_same:
+            k = prev_same[-1]
+            st.caption(
+                f"The piece that just moved last arrived with {label(k)}; "
+                f"this head gives that move {row[k]:.0%} of its attention."
             )
 
 # --------------------------------------------------------------------------

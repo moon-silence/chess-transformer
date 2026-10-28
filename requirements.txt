@@ -1,6 +1,10 @@
+# CPU wheels keep the Streamlit Cloud image small; Colab already has a CUDA torch.
+--extra-index-url https://download.pytorch.org/whl/cpu
 numpy>=1.24
 torch>=2.1
 python-chess>=1.10
 pyyaml>=6.0
 matplotlib>=3.7
 streamlit>=1.36
+altair>=5
+pandas>=2

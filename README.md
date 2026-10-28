@@ -47,6 +47,7 @@ character-level reference.
 | Evaluation is correct | an oracle model that knows the true game scores 100% legal, 100% exact, at every ply | `test_legality.py` |
 | Probes are aligned to the right move | each move's last token is located by byte offset, so features are read exactly after move *k*; board labels checked against hand-computed positions | `test_probes.py` |
 | Probe fitting works | recovers a planted linear rule; material balance matches hand-computed captures | `test_probes.py` |
+| Attention read-out does not change the model | recording the softmax weights leaves logits bit-identical; weights are causal and sum to 1, also at move level when tokens span two moves | `test_attention.py` |
 | Exported app models are exact | weights reloaded from `models/` give identical logits | `test_scripts.py` |
 
 **Status:** code complete; the full sweep and probes run on a Colab GPU next. Results (bits per
@@ -82,7 +83,7 @@ training example is guaranteed legal.
 git clone https://github.com/moon-silence/chess-transformer.git
 cd chess-transformer
 pip install -e ".[dev]"
-pytest                                   # 99 tests
+pytest                                   # 103 tests
 
 bash scripts/download_data.sh            # 19 grandmaster archives from pgnmentor.com
 python scripts/prepare_data.py           # validate, dedupe, split, train 4 tokenizers (~15 min)
@@ -100,13 +101,15 @@ exported app models are pushed back to the repo at the end.
 
 ## The app
 
-`streamlit run app/streamlit_app.py` opens five tabs:
+`streamlit run app/streamlit_app.py` opens six tabs:
 
 - **Play it** — play against the model; every model move is marked legal, legal after a retry, or
   illegal (replaced by a random legal move), with its rejected attempts shown.
 - **Watch it play** — give it a real opening and let it play both sides until its first illegal move.
 - **Inside the model** — the real board next to the board a linear probe reads from the model's
   activations, with wrong squares in red.
+- **Attention** — pick a layer and head: arrows show which earlier moves the model looks back at
+  while reading a move, next to the full move-by-move attention heatmap.
 - **Tokenizer** — the same movetext split into tokens by each vocabulary.
 - **Results** — the sweep table and every figure.
 
@@ -123,13 +126,14 @@ src/chesslm/
   train.py                         # training loop with bits-per-byte evaluation
   legality.py                      # token-healing sampler + legal-move metrics
   probes.py                        # residual-stream features, board/outcome probes, zero-shot
+  attention.py                     # attention weights per layer/head, token- and move-level
 scripts/                           # download, prepare, train, evaluate, sweep, probes,
                                    # figures, export_models
-app/streamlit_app.py               # play / watch / inside the model / tokenizer / results
+app/streamlit_app.py               # play / watch / inside the model / attention / tokenizer / results
 models/                            # exported weights for the app (after the Colab run)
 configs/base.yaml                  # the one config every sweep run shares
 notebooks/colab_sweep.ipynb        # full experiment on a Colab GPU
-tests/                             # 99 tests
+tests/                             # 103 tests
 ```
 
 ## Data
