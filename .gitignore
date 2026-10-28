@@ -27,3 +27,7 @@ report/*.toc
 data/
 runs/
 *.pt
+
+# exported weights for the app (scripts/export_models.py) are committed
+!models/
+!models/**/*.pt

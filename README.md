@@ -2,7 +2,7 @@
 
 A 360K-parameter transformer that has never been told the rules of chess, trained on 72,885
 grandmaster games written as plain text — built as a tested Python package, a reproducible
-Colab sweep, and a technical report.
+Colab sweep, and an interactive Streamlit app where you can play it and look inside it.
 
 
 ---
@@ -25,7 +25,8 @@ That turns "the loss went down" into questions with exact answers.
 |:--:|---|---|
 | 1 | **Tokenization** — how does the BPE vocabulary size change what the model learns? | Same model, data, and compute at vocab 257 / 512 / 1024 / 2048; compared in **bits per byte** |
 | 2 | **Rules** — does a model trained only on move text learn to play legal chess? | Teacher-forced **legal-move rate** on held-out games; **legal plies** before the first error when playing alone |
-| 3 | **Outcome** — can it tell from the moves who is going to win? | *Planned:* result prediction from a game prefix vs. a material-count baseline |
+| 3 | **Board state** — does it track where the pieces are, or only memorise text? | **Linear probe** on each layer's activations reconstructs all 64 squares; compared with an untrained copy of the same network and a per-square majority baseline |
+| 4 | **Outcome** — can it tell from the moves who is going to win? | Win / loss / draw from a game prefix: **zero-shot** (the model writes the result) and a **probe on activations**, vs. majority, material, and material + Elo baselines, by fraction of game seen |
 
 Vocab 257 is raw bytes plus the `<|game|>` separator (no merges), so it doubles as the
 character-level reference.
@@ -44,9 +45,14 @@ character-level reference.
 | Every training game is legal chess | each game replayed on a board; SAN re-rendered canonically; 26 invalid games dropped | `test_pgn.py` |
 | No train/test leakage | 9,191 duplicate games (same game in both players' archives) removed before splitting by game | `test_end_to_end.py` |
 | Evaluation is correct | an oracle model that knows the true game scores 100% legal, 100% exact, at every ply | `test_legality.py` |
+| Probes are aligned to the right move | each move's last token is located by byte offset, so features are read exactly after move *k*; board labels checked against hand-computed positions | `test_probes.py` |
+| Probe fitting works | recovers a planted linear rule; material balance matches hand-computed captures | `test_probes.py` |
+| Exported app models are exact | weights reloaded from `models/` give identical logits | `test_scripts.py` |
 
-Sweep results (bits per byte, legal-move rate, legal plies) will be filled in from
-`results/sweep.json` after the Colab run.
+**Status:** code complete; the full sweep and probes run on a Colab GPU next. Results (bits per
+byte, legal-move rate, legal plies, board-probe accuracy, outcome prediction) will be filled in
+from `results/` after that run. A CPU dev run (400 steps, vocab 512) already shows the probe
+signal: board accuracy 0.72 for the trained model vs. 0.66 untrained and 0.63 majority.
 
 ---
 
@@ -76,18 +82,33 @@ training example is guaranteed legal.
 git clone https://github.com/moon-silence/chess-transformer.git
 cd chess-transformer
 pip install -e ".[dev]"
-pytest                                   # 89 tests
+pytest                                   # 99 tests
 
 bash scripts/download_data.sh            # 19 grandmaster archives from pgnmentor.com
 python scripts/prepare_data.py           # validate, dedupe, split, train 4 tokenizers (~15 min)
 python scripts/run_sweep.py              # train + evaluate each vocab (GPU recommended)
+python scripts/run_probes.py --vocab 512  # board + outcome probes for one run
 python scripts/make_figures.py
+python scripts/export_models.py          # copy weights into models/ for the app
+streamlit run app/streamlit_app.py
 ```
 
 The full sweep is meant for a GPU: open
 [`notebooks/colab_sweep.ipynb`](notebooks/colab_sweep.ipynb) in Colab, select a T4 runtime, and
-run all cells. Data and checkpoints persist on Google Drive, and results are pushed back to the
-repo at the end.
+run all cells. Data and checkpoints persist on Google Drive, and results, figures, and the
+exported app models are pushed back to the repo at the end.
+
+## The app
+
+`streamlit run app/streamlit_app.py` opens five tabs:
+
+- **Play it** — play against the model; every model move is marked legal, legal after a retry, or
+  illegal (replaced by a random legal move), with its rejected attempts shown.
+- **Watch it play** — give it a real opening and let it play both sides until its first illegal move.
+- **Inside the model** — the real board next to the board a linear probe reads from the model's
+  activations, with wrong squares in red.
+- **Tokenizer** — the same movetext split into tokens by each vocabulary.
+- **Results** — the sweep table and every figure.
 
 ## Layout
 
@@ -101,10 +122,14 @@ src/chesslm/
   data.py                          # dedupe, split by game, tokenize, bytes/token
   train.py                         # training loop with bits-per-byte evaluation
   legality.py                      # token-healing sampler + legal-move metrics
-scripts/                           # download, prepare, train, evaluate, sweep, figures
+  probes.py                        # residual-stream features, board/outcome probes, zero-shot
+scripts/                           # download, prepare, train, evaluate, sweep, probes,
+                                   # figures, export_models
+app/streamlit_app.py               # play / watch / inside the model / tokenizer / results
+models/                            # exported weights for the app (after the Colab run)
 configs/base.yaml                  # the one config every sweep run shares
 notebooks/colab_sweep.ipynb        # full experiment on a Colab GPU
-tests/                             # 89 tests
+tests/                             # 99 tests
 ```
 
 ## Data
