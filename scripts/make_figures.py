@@ -241,11 +241,14 @@ def main() -> None:
     if probes:
         fig_board_probe(probes, out)
         by_v = {p["vocab_size"]: p for p in probes}
-        focus = by_v.get(args.focus_vocab) or max(
+        best_probe = by_v.get(args.focus_vocab) or max(
             probes, key=lambda p: max(s["accuracy"] for s in p["board_relative"]["trained"])
         )
-        fig_outcome(focus, out)
-        fig_square_heatmap(focus, out)
+        best_outcome = by_v.get(args.focus_vocab) or max(
+            probes, key=lambda p: p["outcome"].get("zero_shot", {}).get("macro_f1", 0.0)
+        )
+        fig_outcome(best_outcome, out)
+        fig_square_heatmap(best_probe, out)
     else:
         print(f"skipping fig4-6: no {args.probes_dir}/probes_v*.json")
     print(f"wrote {len(list(out.glob('*.png')))} figures to {out}/")

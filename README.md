@@ -1,9 +1,11 @@
 # Chess as a Language: what a from-scratch transformer learns from grandmaster games
 
-A 360K-parameter transformer that has never been told the rules of chess, trained on 72,885
-grandmaster games written as plain text — built as a tested Python package, a reproducible
-Colab sweep, and an interactive Streamlit app where you can play it and look inside it.
+A 344K–459K-parameter transformer that has never been told the rules of chess, trained on
+72,885 grandmaster games written as plain text — built as a tested Python package, a reproducible
+Colab sweep, an interactive Streamlit app, and a technical report (`report/main.tex`).
 
+
+![Tokenizer sweep](figures/fig2_sweep_summary.png)
 
 ---
 
@@ -33,7 +35,7 @@ character-level reference.
 
 ---
 
-## Verified so far
+## Verified
 
 | Claim | Check | Where |
 |---|---|---|
@@ -50,16 +52,54 @@ character-level reference.
 | Attention read-out does not change the model | recording the softmax weights leaves logits bit-identical; weights are causal and sum to 1, also at move level when tokens span two moves | `test_attention.py` |
 | Exported app models are exact | weights reloaded from `models/` give identical logits | `test_scripts.py` |
 
-**Status:** code complete; the full sweep and probes run on a Colab GPU next. Results (bits per
-byte, legal-move rate, legal plies, board-probe accuracy, outcome prediction) will be filled in
-from `results/` after that run. A CPU dev run (400 steps, vocab 512) already shows the probe
-signal: board accuracy 0.72 for the trained model vs. 0.66 untrained and 0.63 majority.
+## Results
+
+All four runs share one config (d_model 64, 5 layers, 4 heads, context 256 tokens, 5,000 steps,
+batch 32) and took about 5 minutes each on a Colab T4. Only the tokenizer changes.
+
+| Vocab | Params | Bytes / token | Context (bytes) | Val bits / byte ↓ | Legal-move rate ↑ | Exact match ↑ | Legal plies alone ↑ |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| **257** (bytes) | 344K | 1.01 | 260 | **1.067** | **0.606** | **0.206** | **5.74** |
+| 512 | 360K | 2.37 | 607 | 1.092 | 0.518 | 0.150 | 4.68 |
+| 1024 | 393K | 3.00 | 768 | 1.135 | 0.538 | 0.126 | 3.56 |
+| 2048 | 459K | 3.60 | 921 | 1.158 | 0.388 | 0.108 | 2.42 |
+
+**1. Tokenization: at this scale, bigger vocabularies hurt.** Byte-level wins on every metric even
+though BPE lets the 2048 model see 3.5× more text per window and per training step. With
+d_model 64, the larger embedding tables take capacity from the transformer, and many BPE merges
+straddle move boundaries (`"8 1"`, `"6.N"`, `".Rd1 R"`), so a single move is split differently
+depending on its neighbours.
+
+**2. Rules: partly learned, and they degrade with game length.** The byte model plays a legal
+next move 61% of the time on held-out games (86% in the opening, 51% in the middlegame, 47% in
+the endgame) and about 6 legal moves in a row on its own after a 10-ply prompt.
+
+![Legal by phase](figures/fig3_legal_by_phase.png)
+
+**3. Board state: a weak but real internal board.** A linear probe reads the 64 squares from layer
+2–4 activations at 0.73 accuracy, against 0.65 for an untrained copy of the same network and
+0.63 for always guessing each square's most common contents. The gap is clearest on occupied
+squares: 0.34–0.36 for the trained model vs. 0.08–0.14 untrained and 0.03 majority. The signal
+peaks in the middle layers and falls off in the last one, consistent with the final layer
+specialising in next-token prediction.
+
+![Board probe](figures/fig4_board_probe_by_layer.png)
+
+**4. Outcome: the model does not know who is winning.** Material balance plus Elo difference
+reaches 0.55 accuracy (macro-F1 0.55); material alone 0.43; a probe on the model's activations
+0.39–0.40, barely above the 0.36 majority baseline. Zero-shot scoring ("which result does the
+model write next?") is at chance for the byte model and collapses to always predicting `1-0` for
+every BPE model: mid-game, each result is so unlikely that the comparison is decided by
+tokenization (`1-0` is 2 BPE tokens, `0-1` and `1/2-1/2` are 3), not by the position. This is a
+limitation of zero-shot scoring a small model out of distribution, and is reported as measured.
+
+![Outcome prediction](figures/fig5_outcome_prediction.png)
 
 ---
 
 ## Three engineering decisions worth pointing at
 
-**Losses are compared in bits per byte, not per token.** A 2048-token vocabulary packs ~2.4×
+**Losses are compared in bits per byte, not per token.** A 2048-token vocabulary packs ~3.6×
 more text into each token than raw bytes do, so its per-token loss is larger even when the model
 is better. Every run is converted with `bpb = (nats/token) / (bytes/token) / ln 2` using the
 measured bytes-per-token of the validation split.
@@ -130,6 +170,7 @@ src/chesslm/
 scripts/                           # download, prepare, train, evaluate, sweep, probes,
                                    # figures, export_models
 app/streamlit_app.py               # play / watch / inside the model / attention / tokenizer / results
+report/main.tex, refs.bib          # technical report (LaTeX + BibTeX)
 models/                            # exported weights for the app (after the Colab run)
 configs/base.yaml                  # the one config every sweep run shares
 notebooks/colab_sweep.ipynb        # full experiment on a Colab GPU
