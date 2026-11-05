@@ -347,9 +347,6 @@ By contrast, linear probes on the transformer's residual stream achieve only $38
 
 \paragraph{Why outcome prediction fails without board supervision.} In grandmaster chess, most games are decided by subtle positional advantages or single-ply tactical blunders before resignations occur, while material remains balanced for most of the game. Because the PGN movetext contains no intermediate evaluation annotations and no player Elo headers, a next-token predictor trained only on moves has almost no gradient signal connecting mid-game positions to the final $3$ bytes (\texttt{1-0}, \texttt{0-1}, \texttt{1/2-1/2}) until the final few moves before resignation or checkmate.
 
-\section{References}
-\label{sec:references}
-
 \bibliographystyle{plainnat}
 \bibliography{refs}
 
